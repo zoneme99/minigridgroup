@@ -1,2 +1,2 @@
-# 2d grid reinforcement learning
-source: https://minigrid.farama.org/
+# Chess reinforcement learning
+source: [Chess](https://python-chess.readthedocs.io/en/latest/)
