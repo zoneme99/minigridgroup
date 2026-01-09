@@ -1,0 +1,17 @@
+# Core Environment
+gymnasium
+minigrid
+numpy
+matplotlib
+pygame            # Needed for rendering MiniGrid windows
+
+# Deep Reinforcement Learning
+torch             # PyTorch (Standard for Deep Learning)
+stable-baselines3 # Best library for out-of-the-box PPO/DQN agents
+shimmy            # Compatibility layer often needed for Gym/Gymnasium
+
+# Jupyter Notebook Tools
+jupyter
+ipykernel         # Connects your .venv to the notebook
+
+imageio          # For image processing in notebooks
