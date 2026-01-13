@@ -15,3 +15,7 @@ jupyter
 ipykernel         # Connects your .venv to the notebook
 
 imageio          # For image processing in notebooks
+
+shimmy                 # Essential for compatibility
+pettingzoo[classic]    # The core MARL library
+supersuit
