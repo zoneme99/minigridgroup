@@ -1,8 +1,11 @@
+import functools
 import gymnasium as gym
 import numpy as np
+from gymnasium.spaces import Discrete, Box
+from pettingzoo import ParallelEnv
 from minigrid.core.grid import Grid
 from minigrid.core.mission import MissionSpace
-from minigrid.core.world_object import WorldObj, Goal, Wall, Ball, Floor
+from minigrid.core.world_object import Goal, Wall, Ball, Floor
 from minigrid.minigrid_env import MiniGridEnv
 
 
@@ -12,126 +15,191 @@ class Flag(Goal):
         self.color = color
 
 
-class CaptureTheFlagEnv(MiniGridEnv):
-    def __init__(self, size=10, max_steps=100, **kwargs):
-        self.size = size
-        mission_space = MissionSpace(
+class CaptureTheFlagPZ(ParallelEnv):
+    metadata = {"render_modes": ["human", "rgb_array"], "name": "ctf_v1"}
+
+    def __init__(self, render_mode=None):
+        self.possible_agents = ["red", "blue"]
+        self.agents = self.possible_agents[:]
+        self.render_mode = render_mode
+
+        # Grid Params
+        self.grid_size = 12
+        self.max_steps = 400  # Increased steps for the return trip
+
+        self.mission_space = MissionSpace(
             mission_func=lambda: "Capture the enemy flag!")
 
-        self.agent1_pos = None
-        self.agent2_pos = None
-
-        super().__init__(
-            mission_space=mission_space,
-            grid_size=size,
-            max_steps=max_steps,
-            **kwargs
+        self.env = MiniGridEnv(
+            grid_size=self.grid_size,
+            max_steps=self.max_steps,
+            mission_space=self.mission_space
         )
 
-    def _gen_grid(self, width, height):
-        self.grid = Grid(width, height)
+    @functools.lru_cache(maxsize=None)
+    def observation_space(self, agent):
+        return Box(low=0, high=255, shape=(56, 56, 3), dtype=np.uint8)
 
-        # 1. Draw the Outer Walls
-        self.grid.wall_rect(0, 0, width, height)
+    @functools.lru_cache(maxsize=None)
+    def action_space(self, agent):
+        return Discrete(3)
 
-        # 2. Paint the Floor (Red Base vs Blue Base)
-        mid_x = width // 2
-        for i in range(1, width - 1):
-            for j in range(1, height - 1):
-                if i < mid_x:
-                    self.grid.set(i, j, Floor('red'))
-                else:
-                    self.grid.set(i, j, Floor('blue'))
+    def render(self):
+        saved_objs = {}
+        for agent in self.agents:
+            if agent in self.agent_pos:
+                pos = tuple(self.agent_pos[agent])
+                saved_objs[agent] = self.env.grid.get(*pos)
+                self.env.grid.set(*pos, Ball(agent))
 
-        # 3. Create the Midfield Barrier
-        for y in range(1, height - 1):
+        original_agent_pos = self.env.agent_pos
+        self.env.agent_pos = (-1, -1)
+        img = self.env.get_frame(highlight=False, tile_size=8)
+
+        self.env.agent_pos = original_agent_pos
+        for agent in self.agents:
+            if agent in self.agent_pos:
+                pos = tuple(self.agent_pos[agent])
+                self.env.grid.set(*pos, saved_objs[agent])
+
+        return img
+
+    def reset(self, seed=None, options=None):
+        self.agents = self.possible_agents[:]
+        self.steps = 0
+        if seed is not None:
+            np.random.seed(seed)
+
+        self.env.step_count = 0
+        self.env.mission = self.mission_space.sample()
+
+        # --- NEW: MEMORY STATE ---
+        self.carrying_flag = {"red": False, "blue": False}
+
+        # 1. Build Walls
+        self.env.grid = Grid(self.grid_size, self.grid_size)
+        self.env.grid.wall_rect(0, 0, self.grid_size, self.grid_size)
+
+        mid_x = self.grid_size // 2
+        for i in range(1, self.grid_size - 1):
+            for j in range(1, self.grid_size - 1):
+                self.env.grid.set(i, j, Floor('red' if i < mid_x else 'blue'))
+
+        for y in range(1, self.grid_size - 1):
             if y % 2 == 0:
-                self.grid.set(mid_x, y, Wall())
+                self.env.grid.set(mid_x, y, Wall())
 
-        # 4. Place Flags
-        self.grid.set(1, height // 2, Flag('red'))
-        self.grid.set(width - 2, height // 2, Flag('blue'))
+        # 2. Random Obstacles
+        obstacles = 0
+        while obstacles < 8:
+            x = np.random.randint(1, self.grid_size - 1)
+            y = np.random.randint(1, self.grid_size - 1)
+            if y == self.grid_size // 2:
+                continue
+            if self.env.grid.get(x, y) is None or self.env.grid.get(x, y).type == 'floor':
+                self.env.grid.set(x, y, Wall())
+                obstacles += 1
 
-        # 5. Place Agents
-        self.agent1_pos = (2, height // 2)
-        self.agent1_dir = 0
-        self.agent2_pos = (width - 3, height // 2)
-        self.agent2_dir = 2
+        # 3. Place Flags
+        self.flag_pos = {
+            "red": (1, self.grid_size // 2),
+            "blue": (self.grid_size - 2, self.grid_size // 2)
+        }
+        self.env.grid.set(*self.flag_pos["red"], Flag('red'))
+        self.env.grid.set(*self.flag_pos["blue"], Flag('blue'))
 
-        self.agent_pos = self.agent1_pos
-        self.agent_dir = self.agent1_dir
-        self.mission = "Capture the flag!"
+        # 4. Spawns
+        self.agent_pos = {}
+        self.agent_dir = {"red": 0, "blue": 2}
 
-    def get_obs_for_agent(self, agent_id):
-        # 1. Determine who is who
-        if agent_id == 1:
-            my_pos = self.agent1_pos
-            my_dir = self.agent1_dir
-            enemy_pos = self.agent2_pos
-            enemy_color = 'blue'
-        else:
-            my_pos = self.agent2_pos
-            my_dir = self.agent2_dir
-            enemy_pos = self.agent1_pos
-            enemy_color = 'red'
+        # Red Spawn
+        while True:
+            ry = np.random.randint(1, self.grid_size - 1)
+            rx = 2
+            if self.env.grid.get(rx, ry).type == 'floor':
+                self.agent_pos["red"] = np.array([rx, ry])
+                break
 
-        # 2. HACK: Temporarily place the enemy as a Ball so the camera sees it
-        previous_obj = self.grid.get(*enemy_pos)
-        if previous_obj is None or previous_obj.type == 'floor':
-            self.grid.set(*enemy_pos, Ball(enemy_color))
+        # Blue Spawn
+        while True:
+            by = np.random.randint(1, self.grid_size - 1)
+            bx = self.grid_size - 3
+            if self.env.grid.get(bx, by).type == 'floor':
+                self.agent_pos["blue"] = np.array([bx, by])
+                break
 
-        self.agent_pos = my_pos
-        self.agent_dir = my_dir
+        self.env.agent_pos = self.agent_pos["red"]
+        self.env.agent_dir = self.agent_dir["red"]
 
-        # 3. GENERATE OBSERVATION
-        # If we are in RGB mode, we return pixels (0-255).
-        # If we are in default mode, we return integers.
-        if self.render_mode == 'rgb_array':
-            # tile_size=8 gives a 56x56 image for a 7x7 view
-            pov = self.get_pov_render(tile_size=8)
-            obs = {'image': pov}
-        else:
-            obs = self.gen_obs()
+        return self._get_observations(), {}
 
-        # 4. Cleanup: Restore the floor/object
-        self.grid.set(*enemy_pos, previous_obj)
+    def _get_observations(self):
+        observations = {}
+        for agent_id in self.agents:
+            me = agent_id
+            enemy = "blue" if me == "red" else "red"
 
-        return obs
+            if enemy in self.agent_pos:
+                enemy_pos = tuple(self.agent_pos[enemy])
+                prev_obj = self.env.grid.get(*enemy_pos)
+                if prev_obj is None or prev_obj.type == 'floor':
+                    self.env.grid.set(*enemy_pos, Ball(enemy))
 
-    def step_multi_agent(self, action_red, action_blue):
-        # RED TURN
-        self.agent_pos = self.agent1_pos
-        self.agent_dir = self.agent1_dir
+            self.env.agent_pos = self.agent_pos[me]
+            self.env.agent_dir = self.agent_dir[me]
+            observations[me] = self.env.get_pov_render(tile_size=8)
 
-        obs, reward_red, terminated, truncated, _ = super().step(action_red)
+            if enemy in self.agent_pos:
+                self.env.grid.set(*enemy_pos, prev_obj)
 
-        self.agent1_pos = self.agent_pos
-        self.agent1_dir = self.agent_dir
+        return observations
 
-        if tuple(self.agent1_pos) == (self.width - 2, self.height // 2):
-            reward_red = 10
-            terminated = True
-        else:
-            reward_red = -0.01
+    def step(self, actions):
+        rewards = {a: -0.01 for a in self.agents}
+        terminations = {a: False for a in self.agents}
+        truncations = {a: False for a in self.agents}
+        infos = {a: {} for a in self.agents}
 
-        # BLUE TURN
-        self.agent_pos = self.agent2_pos
-        self.agent_dir = self.agent2_dir
+        self.steps += 1
 
-        obs, reward_blue, terminated_blue, _, _ = super().step(action_blue)
+        for agent_id in self.agents:
+            if agent_id not in actions:
+                continue
 
-        self.agent2_pos = self.agent_pos
-        self.agent2_dir = self.agent_dir
+            action = actions[agent_id]
+            self.env.agent_pos = self.agent_pos[agent_id]
+            self.env.agent_dir = self.agent_dir[agent_id]
 
-        if tuple(self.agent2_pos) == (1, self.height // 2):
-            reward_blue = 10
-            terminated_blue = True
-        else:
-            reward_blue = -0.01
+            self.env.step(action)
 
-        done = terminated or terminated_blue
+            self.agent_pos[agent_id] = self.env.agent_pos
+            self.agent_dir[agent_id] = self.env.agent_dir
 
-        obs_red = self.get_obs_for_agent(1)
-        obs_blue = self.get_obs_for_agent(2)
+            # --- NEW CAPTURE LOGIC ---
+            current_pos = tuple(self.env.agent_pos)
+            enemy = "blue" if agent_id == "red" else "red"
+            enemy_flag_loc = self.flag_pos[enemy]
+            my_base_loc = self.flag_pos[agent_id]
 
-        return obs_red, reward_red, obs_blue, reward_blue, done
+            # 1. PICKUP
+            if current_pos == enemy_flag_loc and not self.carrying_flag[agent_id]:
+                self.carrying_flag[agent_id] = True
+                self.env.grid.set(*enemy_flag_loc, Floor(enemy))
+                rewards[agent_id] += 1.0  # Bonus for picking up
+
+            # 2. RETURN & WIN
+            if current_pos == my_base_loc and self.carrying_flag[agent_id]:
+                rewards[agent_id] += 10.0  # Victory!
+                for a in self.agents:
+                    terminations[a] = True
+
+        if self.steps >= self.max_steps:
+            for a in self.agents:
+                truncations[a] = True
+
+        observations = self._get_observations()
+
+        if any(terminations.values()) or any(truncations.values()):
+            self.agents = []
+
+        return observations, rewards, terminations, truncations, infos
