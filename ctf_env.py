@@ -154,9 +154,9 @@ class CaptureTheFlagPZ(ParallelEnv):
 
         return observations
 
-    def reward_policy(self, agent_id):
+    def reward_policy(self, agent_id, actions, rewards, terminations):
         if agent_id not in actions:
-            continue
+            return
 
         action = actions[agent_id]
         self.env.agent_pos = self.agent_pos[agent_id]
@@ -194,7 +194,7 @@ class CaptureTheFlagPZ(ParallelEnv):
         self.steps += 1
 
         for agent_id in self.agents:
-            self.reward_policy(agent_id)
+            self.reward_policy(agent_id, actions, rewards, terminations)
 
         if self.steps >= self.max_steps:
             for a in self.agents:
