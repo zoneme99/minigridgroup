@@ -1,6 +1,6 @@
 # MiniGrid Tournament
 
-- Researching...
+#### Installation
 
 Use this command in your terminal to install the requirements:
 
@@ -14,10 +14,10 @@ Connect the notebook to the environment:
 
 3. In the top-right corner of the notebook interface, click on the kernel name (it usually says "Python 3").
 
-4. Select "Python (CTF Project)" from the list.
+4. Select "Python (CTF Project)" from the list. (or use your standard .venv kernel)
 
 
-Enable GPU:
+#### Enable GPU:
 
 Important to check if "cu121" is the right version for your GPU. On RTX 5070 Ti, "cu128" works. 
 
@@ -25,3 +25,13 @@ Open a terminal and paste:
 pip uninstall torch torchvision torchaudio -y
 pip cache purge  # optional, to clear old wheels
 pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121
+
+
+#### Troubleshooting : Virtual Environment
+If you have problem with: 
+	pip install -r requirements.txt
+
+then try removing [classic] from pettingzoo[classic], 
+save the file,
+re-run the script
+
