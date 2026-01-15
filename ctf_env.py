@@ -5,7 +5,7 @@ from gymnasium.spaces import Discrete, Box
 from pettingzoo import ParallelEnv
 from minigrid.core.grid import Grid
 from minigrid.core.mission import MissionSpace
-from minigrid.core.world_object import Goal, Wall, Ball, Floor
+from minigrid.core.world_object import Goal, Wall, Ball, Floor, Key
 from minigrid.minigrid_env import MiniGridEnv
 
 
@@ -50,7 +50,12 @@ class CaptureTheFlagPZ(ParallelEnv):
             if agent in self.agent_pos:
                 pos = tuple(self.agent_pos[agent])
                 saved_objs[agent] = self.env.grid.get(*pos)
-                self.env.grid.set(*pos, Ball(agent))
+ 
+                # Switch to Key Sprite if agent carries flag
+                if self.carrying_flag.get(agent, False):
+                    self.env.grid.set(*pos, Key(agent))
+                else:
+                    self.env.grid.set(*pos, Ball(agent))
 
         original_agent_pos = self.env.agent_pos
         self.env.agent_pos = (-1, -1)
@@ -132,6 +137,7 @@ class CaptureTheFlagPZ(ParallelEnv):
         self.env.agent_dir = self.agent_dir["red"]
 
         return self._get_observations(), {}
+
 
     def _get_observations(self):
         observations = {}
