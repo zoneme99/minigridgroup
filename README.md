@@ -4,7 +4,7 @@
 
 Use this command in your terminal to install the requirements:
 
-pip install -r requirements.txt
+pip install -r requirements.txt  
 (If you run in to problems then try to remove [classic] from pettingzoo[classic], save and re-run pip install)
 
 Connect the notebook to the environment:
