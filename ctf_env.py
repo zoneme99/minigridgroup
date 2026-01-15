@@ -136,6 +136,14 @@ class CaptureTheFlagPZ(ParallelEnv):
         self.env.agent_pos = self.agent_pos["red"]
         self.env.agent_dir = self.agent_dir["red"]
 
+        # (!) Agent with Flag Collision 1/2
+        # Save initial spawn positions so we can return agents here later
+        # We must use .copy() so the spawn point doesn't move when the agent moves
+        self.spawn_pos = {
+            "red": self.agent_pos["red"].copy(),
+            "blue": self.agent_pos["blue"].copy()
+        }
+
         return self._get_observations(), {}
 
 
@@ -201,6 +209,35 @@ class CaptureTheFlagPZ(ParallelEnv):
 
         for agent_id in self.agents:
             self.reward_policy(agent_id, actions, rewards, terminations)
+
+        # (!) Agent with Flag Collision 2/2
+        # If an agent gets caught with a flag and the agent gets sent 
+        # back to there respective starting positions.
+        # We check this AFTER both agents have moved for the turn
+        if "red" in self.agent_pos and "blue" in self.agent_pos:
+            red_p = tuple(self.agent_pos["red"])
+            blue_p = tuple(self.agent_pos["blue"])
+
+            if red_p == blue_p:
+                # Check both agents to see if either was carrying a flag
+                for carrier_id, tagger_id in [("red", "blue"), ("blue", "red")]:
+                    if self.carrying_flag[carrier_id]:
+                        # (!) Move these to reward_policy?
+                        # Penalty for being caught, reward for the tagger
+                        rewards[carrier_id] -= 5.0
+                        rewards[tagger_id] += 5.0
+                        
+                        # Reset flag status
+                        self.carrying_flag[carrier_id] = False
+                        
+                        # Teleport carrier back to their original spawn
+                        self.agent_pos[carrier_id] = self.spawn_pos[carrier_id].copy()
+                        
+                        # Put the flag back at its original base
+                        # The tagger's flag is the one that was being carried
+                        flag_home = self.flag_pos[tagger_id]
+                        self.env.grid.set(*flag_home, Flag(tagger_id))
+
 
         if self.steps >= self.max_steps:
             for a in self.agents:
