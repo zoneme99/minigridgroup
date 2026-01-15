@@ -5,6 +5,7 @@
 Use this command in your terminal to install the requirements:
 
 pip install -r requirements.txt
+(If you run in to problems then try to remove [classic] from pettingzoo[classic], save and re-run pip install)
 
 Connect the notebook to the environment:
 
@@ -26,12 +27,4 @@ pip uninstall torch torchvision torchaudio -y
 pip cache purge  # optional, to clear old wheels
 pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121
 
-
-#### Troubleshooting : Virtual Environment
-If you have problem with: 
-	pip install -r requirements.txt
-
-then try removing [classic] from pettingzoo[classic], 
-save the file,
-re-run the script
 
