@@ -9,6 +9,17 @@ def reward_policy(self, agent_id, rewards, actions, terminations):
     self.agent_pos[agent_id] = self.env.agent_pos
     self.agent_dir[agent_id] = self.env.agent_dir
 
+    # Available vars
+    # - self.agent_pos: Dictionary with keys for each agent, giving their (x, y) positions on the grid.
+    # - self.agent_dir: Dictionary, giving facing direction (as an int) for each agent.
+    # - self.carrying_flag: Dictionary, True if the agent is carrying a flag.
+    # - self.flag_pos: Dictionary, position of each team's flag.
+    # - self.steps: Current time step (int).
+    # - self.grid_size: Grid dimensions.
+    # - self.spawn_pos: Original spawn positions for each agent.
+    # - self.max_steps: Maximum steps per episode.
+    # - actions: Dictionary of last actions (indices, up to Discrete(3)).
+
     # --- NEW CAPTURE LOGIC ---
     current_pos = tuple(self.env.agent_pos)
     enemy = "blue" if agent_id == "red" else "red"
