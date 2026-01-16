@@ -25,7 +25,7 @@ class CaptureTheFlagPZ(ParallelEnv):
 
         # Grid Params
         self.grid_size = 12
-        self.max_steps = 400  # Increased steps for the return trip
+        self.max_steps = 400
 
         self.mission_space = MissionSpace(
             mission_func=lambda: "Capture the enemy flag!")
@@ -36,6 +36,8 @@ class CaptureTheFlagPZ(ParallelEnv):
             mission_space=self.mission_space
         )
 
+        self.spawn_pos = {}
+
     @functools.lru_cache(maxsize=None)
     def observation_space(self, agent):
         return Box(low=0, high=255, shape=(56, 56, 3), dtype=np.uint8)
@@ -45,27 +47,37 @@ class CaptureTheFlagPZ(ParallelEnv):
         return Discrete(3)
 
     def render(self):
-        saved_objs = {}
+        # --- FIX 1: THE GHOST FIX ---
+        # Separate the "Save" loop from the "Draw" loop.
+        # This ensures we never accidentally save another agent as 'background'.
+        saved_objs = []
+
+        # 1. Save Backgrounds
         for agent in self.agents:
             if agent in self.agent_pos:
                 pos = tuple(self.agent_pos[agent])
-                saved_objs[agent] = self.env.grid.get(*pos)
- 
-                # Switch to Key Sprite if agent carries flag
+                # We save the (pos, obj) tuple
+                saved_objs.append((pos, self.env.grid.get(*pos)))
+
+        # 2. Draw Agents
+        for agent in self.agents:
+            if agent in self.agent_pos:
+                pos = tuple(self.agent_pos[agent])
                 if self.carrying_flag.get(agent, False):
                     self.env.grid.set(*pos, Key(agent))
                 else:
                     self.env.grid.set(*pos, Ball(agent))
 
+        # 3. Take Picture
         original_agent_pos = self.env.agent_pos
         self.env.agent_pos = (-1, -1)
         img = self.env.get_frame(highlight=False, tile_size=8)
-
         self.env.agent_pos = original_agent_pos
-        for agent in self.agents:
-            if agent in self.agent_pos:
-                pos = tuple(self.agent_pos[agent])
-                self.env.grid.set(*pos, saved_objs[agent])
+
+        # 4. Restore Backgrounds
+        # We restore in reverse order just to be safe, though not strictly necessary now
+        for pos, obj in reversed(saved_objs):
+            self.env.grid.set(*pos, obj)
 
         return img
 
@@ -78,10 +90,9 @@ class CaptureTheFlagPZ(ParallelEnv):
         self.env.step_count = 0
         self.env.mission = self.mission_space.sample()
 
-        # --- NEW: MEMORY STATE ---
         self.carrying_flag = {"red": False, "blue": False}
 
-        # 1. Build Walls
+        # 1. Grid
         self.env.grid = Grid(self.grid_size, self.grid_size)
         self.env.grid.wall_rect(0, 0, self.grid_size, self.grid_size)
 
@@ -94,7 +105,7 @@ class CaptureTheFlagPZ(ParallelEnv):
             if y % 2 == 0:
                 self.env.grid.set(mid_x, y, Wall())
 
-        # 2. Random Obstacles
+        # 2. Obstacles
         obstacles = 0
         while obstacles < 8:
             x = np.random.randint(1, self.grid_size - 1)
@@ -105,7 +116,7 @@ class CaptureTheFlagPZ(ParallelEnv):
                 self.env.grid.set(x, y, Wall())
                 obstacles += 1
 
-        # 3. Place Flags
+        # 3. Flags
         self.flag_pos = {
             "red": (1, self.grid_size // 2),
             "blue": (self.grid_size - 2, self.grid_size // 2)
@@ -122,6 +133,7 @@ class CaptureTheFlagPZ(ParallelEnv):
             ry = np.random.randint(1, self.grid_size - 1)
             rx = 2
             if self.env.grid.get(rx, ry).type == 'floor':
+                self.spawn_pos["red"] = np.array([rx, ry])
                 self.agent_pos["red"] = np.array([rx, ry])
                 break
 
@@ -130,22 +142,14 @@ class CaptureTheFlagPZ(ParallelEnv):
             by = np.random.randint(1, self.grid_size - 1)
             bx = self.grid_size - 3
             if self.env.grid.get(bx, by).type == 'floor':
+                self.spawn_pos["blue"] = np.array([bx, by])
                 self.agent_pos["blue"] = np.array([bx, by])
                 break
 
         self.env.agent_pos = self.agent_pos["red"]
         self.env.agent_dir = self.agent_dir["red"]
 
-        # (!) Agent with Flag Collision 1/2
-        # Save initial spawn positions so we can return agents here later
-        # We must use .copy() so the spawn point doesn't move when the agent moves
-        self.spawn_pos = {
-            "red": self.agent_pos["red"].copy(),
-            "blue": self.agent_pos["blue"].copy()
-        }
-
         return self._get_observations(), {}
-
 
     def _get_observations(self):
         observations = {}
@@ -157,7 +161,10 @@ class CaptureTheFlagPZ(ParallelEnv):
                 enemy_pos = tuple(self.agent_pos[enemy])
                 prev_obj = self.env.grid.get(*enemy_pos)
                 if prev_obj is None or prev_obj.type == 'floor':
-                    self.env.grid.set(*enemy_pos, Ball(enemy))
+                    if self.carrying_flag[enemy]:
+                        self.env.grid.set(*enemy_pos, Key(enemy))
+                    else:
+                        self.env.grid.set(*enemy_pos, Ball(enemy))
 
             self.env.agent_pos = self.agent_pos[me]
             self.env.agent_dir = self.agent_dir[me]
@@ -168,83 +175,72 @@ class CaptureTheFlagPZ(ParallelEnv):
 
         return observations
 
-    def reward_policy(self, agent_id, actions, rewards, terminations):
-        if agent_id not in actions:
-            return
-
-        action = actions[agent_id]
-        self.env.agent_pos = self.agent_pos[agent_id]
-        self.env.agent_dir = self.agent_dir[agent_id]
-        self.env.step(action)
-        self.agent_pos[agent_id] = self.env.agent_pos
-        self.agent_dir[agent_id] = self.env.agent_dir
-
-        # --- NEW CAPTURE LOGIC ---
-        current_pos = tuple(self.env.agent_pos)
-        enemy = "blue" if agent_id == "red" else "red"
-        enemy_flag_loc = self.flag_pos[enemy]
-        my_base_loc = self.flag_pos[agent_id]
-        
-        # 1. PICKUP
-        if current_pos == enemy_flag_loc and not self.carrying_flag[agent_id]:
-            self.carrying_flag[agent_id] = True
-            self.env.grid.set(*enemy_flag_loc, Floor(enemy))
-            rewards[agent_id] += 1.0  # Bonus for picking up
-    
-        # 2. RETURN & WIN
-        if current_pos == my_base_loc and self.carrying_flag[agent_id]:
-            rewards[agent_id] += 10.0  # Victory!
-            for a in self.agents:
-                terminations[a] = True
-        
-        
-    
     def step(self, actions):
         rewards = {a: -0.01 for a in self.agents}
         terminations = {a: False for a in self.agents}
         truncations = {a: False for a in self.agents}
         infos = {a: {} for a in self.agents}
 
+        # --- FIX 2: THE HEAVY FLAG ---
+        # Increase the "Time Pressure" on the flag carrier.
+        # If they just run in circles, they will lose points fast.
+        for agent in self.agents:
+            if self.carrying_flag[agent]:
+                rewards[agent] -= 0.1  # 10x higher penalty than normal walking
+
         self.steps += 1
 
         for agent_id in self.agents:
-            self.reward_policy(agent_id, actions, rewards, terminations)
+            if agent_id not in actions:
+                continue
 
-        # (!) Agent with Flag Collision 2/2
-        # If an agent gets caught with a flag and the agent gets sent 
-        # back to there respective starting positions.
-        # We check this AFTER both agents have moved for the turn
+            action = actions[agent_id]
+            self.env.agent_pos = self.agent_pos[agent_id]
+            self.env.agent_dir = self.agent_dir[agent_id]
+
+            self.env.step(action)
+
+            self.agent_pos[agent_id] = self.env.agent_pos
+            self.agent_dir[agent_id] = self.env.agent_dir
+
+            # CAPTURE LOGIC
+            current_pos = tuple(self.env.agent_pos)
+            enemy = "blue" if agent_id == "red" else "red"
+            enemy_flag_loc = self.flag_pos[enemy]
+            my_base_loc = self.flag_pos[agent_id]
+
+            if current_pos == enemy_flag_loc and not self.carrying_flag[agent_id]:
+                self.carrying_flag[agent_id] = True
+                self.env.grid.set(*enemy_flag_loc, Floor(enemy))
+                rewards[agent_id] += 5.0
+
+            if current_pos == my_base_loc and self.carrying_flag[agent_id]:
+                rewards[agent_id] += 20.0
+                for a in self.agents:
+                    terminations[a] = True
+
+        # TAGGING LOGIC
         if "red" in self.agent_pos and "blue" in self.agent_pos:
             red_p = tuple(self.agent_pos["red"])
             blue_p = tuple(self.agent_pos["blue"])
 
             if red_p == blue_p:
-                # Check both agents to see if either was carrying a flag
-                for carrier_id, tagger_id in [("red", "blue"), ("blue", "red")]:
-                    if self.carrying_flag[carrier_id]:
-                        # (!) Move these to reward_policy?
-                        # Penalty for being caught, reward for the tagger
-                        rewards[carrier_id] -= 5.0
-                        rewards[tagger_id] += 5.0
-                        
-                        # Reset flag status
-                        self.carrying_flag[carrier_id] = False
-                        
-                        # Teleport carrier back to their original spawn
-                        self.agent_pos[carrier_id] = self.spawn_pos[carrier_id].copy()
-                        
-                        # Put the flag back at its original base
-                        # The tagger's flag is the one that was being carried
-                        flag_home = self.flag_pos[tagger_id]
-                        self.env.grid.set(*flag_home, Flag(tagger_id))
+                for carrier, tagger in [("red", "blue"), ("blue", "red")]:
+                    if self.carrying_flag[carrier]:
+                        rewards[carrier] -= 2.0
+                        rewards[tagger] += 2.0
 
+                        self.carrying_flag[carrier] = False
+                        self.agent_pos[carrier] = self.spawn_pos[carrier].copy()
+
+                        flag_home = self.flag_pos[tagger]
+                        self.env.grid.set(*flag_home, Flag(tagger))
 
         if self.steps >= self.max_steps:
             for a in self.agents:
                 truncations[a] = True
 
         observations = self._get_observations()
-
         if any(terminations.values()) or any(truncations.values()):
             self.agents = []
 
