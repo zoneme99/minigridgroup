@@ -28,12 +28,13 @@ class CaptureTheFlagPZ(ParallelEnv):
         self.max_steps = 400  # Increased steps for the return trip
 
         self.mission_space = MissionSpace(
-            mission_func=lambda: "Capture the enemy flag!")
+            mission_func=lambda: "Capture the enemy flag!"
+        )
 
         self.env = MiniGridEnv(
             grid_size=self.grid_size,
             max_steps=self.max_steps,
-            mission_space=self.mission_space
+            mission_space=self.mission_space,
         )
 
     @functools.lru_cache(maxsize=None)
@@ -83,7 +84,7 @@ class CaptureTheFlagPZ(ParallelEnv):
         mid_x = self.grid_size // 2
         for i in range(1, self.grid_size - 1):
             for j in range(1, self.grid_size - 1):
-                self.env.grid.set(i, j, Floor('red' if i < mid_x else 'blue'))
+                self.env.grid.set(i, j, Floor("red" if i < mid_x else "blue"))
 
         for y in range(1, self.grid_size - 1):
             if y % 2 == 0:
@@ -96,17 +97,20 @@ class CaptureTheFlagPZ(ParallelEnv):
             y = np.random.randint(1, self.grid_size - 1)
             if y == self.grid_size // 2:
                 continue
-            if self.env.grid.get(x, y) is None or self.env.grid.get(x, y).type == 'floor':
+            if (
+                self.env.grid.get(x, y) is None
+                or self.env.grid.get(x, y).type == "floor"
+            ):
                 self.env.grid.set(x, y, Wall())
                 obstacles += 1
 
         # 3. Place Flags
         self.flag_pos = {
             "red": (1, self.grid_size // 2),
-            "blue": (self.grid_size - 2, self.grid_size // 2)
+            "blue": (self.grid_size - 2, self.grid_size // 2),
         }
-        self.env.grid.set(*self.flag_pos["red"], Flag('red'))
-        self.env.grid.set(*self.flag_pos["blue"], Flag('blue'))
+        self.env.grid.set(*self.flag_pos["red"], Flag("red"))
+        self.env.grid.set(*self.flag_pos["blue"], Flag("blue"))
 
         # 4. Spawns
         self.agent_pos = {}
@@ -116,7 +120,7 @@ class CaptureTheFlagPZ(ParallelEnv):
         while True:
             ry = np.random.randint(1, self.grid_size - 1)
             rx = 2
-            if self.env.grid.get(rx, ry).type == 'floor':
+            if self.env.grid.get(rx, ry).type == "floor":
                 self.agent_pos["red"] = np.array([rx, ry])
                 break
 
@@ -124,7 +128,7 @@ class CaptureTheFlagPZ(ParallelEnv):
         while True:
             by = np.random.randint(1, self.grid_size - 1)
             bx = self.grid_size - 3
-            if self.env.grid.get(bx, by).type == 'floor':
+            if self.env.grid.get(bx, by).type == "floor":
                 self.agent_pos["blue"] = np.array([bx, by])
                 break
 
@@ -142,7 +146,7 @@ class CaptureTheFlagPZ(ParallelEnv):
             if enemy in self.agent_pos:
                 enemy_pos = tuple(self.agent_pos[enemy])
                 prev_obj = self.env.grid.get(*enemy_pos)
-                if prev_obj is None or prev_obj.type == 'floor':
+                if prev_obj is None or prev_obj.type == "floor":
                     self.env.grid.set(*enemy_pos, Ball(enemy))
 
             self.env.agent_pos = self.agent_pos[me]
@@ -154,10 +158,7 @@ class CaptureTheFlagPZ(ParallelEnv):
 
         return observations
 
-    def reward_policy(self, agent_id):
-        if agent_id not in actions:
-            continue
-
+    def reward_policy(self, agent_id, rewards, actions, terminations):
         action = actions[agent_id]
         self.env.agent_pos = self.agent_pos[agent_id]
         self.env.agent_dir = self.agent_dir[agent_id]
@@ -170,21 +171,19 @@ class CaptureTheFlagPZ(ParallelEnv):
         enemy = "blue" if agent_id == "red" else "red"
         enemy_flag_loc = self.flag_pos[enemy]
         my_base_loc = self.flag_pos[agent_id]
-        
+
         # 1. PICKUP
         if current_pos == enemy_flag_loc and not self.carrying_flag[agent_id]:
             self.carrying_flag[agent_id] = True
             self.env.grid.set(*enemy_flag_loc, Floor(enemy))
             rewards[agent_id] += 1.0  # Bonus for picking up
-    
+
         # 2. RETURN & WIN
         if current_pos == my_base_loc and self.carrying_flag[agent_id]:
             rewards[agent_id] += 10.0  # Victory!
             for a in self.agents:
                 terminations[a] = True
-        
-        
-    
+
     def step(self, actions):
         rewards = {a: -0.01 for a in self.agents}
         terminations = {a: False for a in self.agents}
@@ -194,7 +193,10 @@ class CaptureTheFlagPZ(ParallelEnv):
         self.steps += 1
 
         for agent_id in self.agents:
-            self.reward_policy(agent_id)
+            if agent_id not in actions:
+                continue
+
+            self.reward_policy(agent_id, rewards, actions, terminations)
 
         if self.steps >= self.max_steps:
             for a in self.agents:
