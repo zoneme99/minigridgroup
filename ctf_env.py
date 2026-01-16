@@ -7,6 +7,7 @@ from minigrid.core.grid import Grid
 from minigrid.core.mission import MissionSpace
 from minigrid.core.world_object import Goal, Wall, Ball, Floor, Key
 from minigrid.minigrid_env import MiniGridEnv
+from reward_logic import reward_policy
 
 
 class Flag(Goal):
@@ -22,6 +23,7 @@ class CaptureTheFlagPZ(ParallelEnv):
         self.possible_agents = ["red", "blue"]
         self.agents = self.possible_agents[:]
         self.render_mode = render_mode
+        self.reward_policy = reward_policy
 
         # Grid Params
         self.grid_size = 12
@@ -51,7 +53,7 @@ class CaptureTheFlagPZ(ParallelEnv):
             if agent in self.agent_pos:
                 pos = tuple(self.agent_pos[agent])
                 saved_objs[agent] = self.env.grid.get(*pos)
- 
+
                 # Switch to Key Sprite if agent carries flag
                 if self.carrying_flag.get(agent, False):
                     self.env.grid.set(*pos, Key(agent))
@@ -145,11 +147,10 @@ class CaptureTheFlagPZ(ParallelEnv):
         # We must use .copy() so the spawn point doesn't move when the agent moves
         self.spawn_pos = {
             "red": self.agent_pos["red"].copy(),
-            "blue": self.agent_pos["blue"].copy()
+            "blue": self.agent_pos["blue"].copy(),
         }
 
         return self._get_observations(), {}
-
 
     def _get_observations(self):
         observations = {}
@@ -172,31 +173,6 @@ class CaptureTheFlagPZ(ParallelEnv):
 
         return observations
 
-    def reward_policy(self, agent_id, rewards, actions, terminations):
-        action = actions[agent_id]
-        self.env.agent_pos = self.agent_pos[agent_id]
-        self.env.agent_dir = self.agent_dir[agent_id]
-        self.env.step(action)
-        self.agent_pos[agent_id] = self.env.agent_pos
-        self.agent_dir[agent_id] = self.env.agent_dir
-
-        # --- NEW CAPTURE LOGIC ---
-        current_pos = tuple(self.env.agent_pos)
-        enemy = "blue" if agent_id == "red" else "red"
-        enemy_flag_loc = self.flag_pos[enemy]
-        my_base_loc = self.flag_pos[agent_id]
-
-        # 1. PICKUP
-        if current_pos == enemy_flag_loc and not self.carrying_flag[agent_id]:
-            self.carrying_flag[agent_id] = True
-            self.env.grid.set(*enemy_flag_loc, Floor(enemy))
-            rewards[agent_id] += 1.0  # Bonus for picking up
-
-        # 2. RETURN & WIN
-        if current_pos == my_base_loc and self.carrying_flag[agent_id]:
-            rewards[agent_id] += 10.0  # Victory!
-            for a in self.agents:
-                terminations[a] = True
 
     def step(self, actions):
         rewards = {a: -0.01 for a in self.agents}
