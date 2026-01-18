@@ -23,7 +23,7 @@ class CaptureTheFlagPZ(ParallelEnv):
         self.reward_policy = reward_policy
 
         # Grid Params
-        self.grid_size = 12
+        self.grid_size = 21
         self.max_steps = 400  # Increased steps for the return trip
 
         self.mission_space = MissionSpace(
@@ -78,44 +78,40 @@ class CaptureTheFlagPZ(ParallelEnv):
 
         self.env.step_count = 0
         self.env.mission = self.mission_space.sample()
-
-        # (4X)
-        # --- NEW: MEMORY STATE ---
         self.carrying_flag = {agent: False for agent in self.possible_agents}
 
-
-        # 1. Build Walls
+        # 1. Grid
         self.env.grid = Grid(self.grid_size, self.grid_size)
         self.env.grid.wall_rect(0, 0, self.grid_size, self.grid_size)
 
+        # 2. Floor Coloring
         mid_x = self.grid_size // 2
         for i in range(1, self.grid_size - 1):
             for j in range(1, self.grid_size - 1):
                 self.env.grid.set(i, j, Floor("red" if i < mid_x else "blue"))
 
+        # 3. Center Spine
         for y in range(1, self.grid_size - 1):
-            # if y % 2 == 0:
-            # (!) Test Fewer walls
-            if y % 3 == 0:
+            if y % 2 == 0:
                 self.env.grid.set(mid_x, y, Wall())
 
-        # 2. Random Obstacles
-        obstacles = 0
-        # while obstacles < 8:
-        # (!) Test Fewer walls
-        while obstacles < 6:
-            x = np.random.randint(1, self.grid_size - 1)
+        # 4. Mirrored Obstacles
+        num_pairs = 0
+        target_pairs = 15
+        while num_pairs < target_pairs:
+            x = np.random.randint(1, mid_x)
             y = np.random.randint(1, self.grid_size - 1)
+
             if y == self.grid_size // 2:
                 continue
-            if (
-                self.env.grid.get(x, y) is None
-                or self.env.grid.get(x, y).type == "floor"
-            ):
-                self.env.grid.set(x, y, Wall())
-                obstacles += 1
 
-        # 3. Place Flags
+            if self.env.grid.get(x, y).type == "floor":
+                self.env.grid.set(x, y, Wall())
+                mirror_x = self.grid_size - 1 - x
+                self.env.grid.set(mirror_x, y, Wall())
+                num_pairs += 1
+
+        # 5. Place Flags
         self.flag_pos = {
             "red": (1, self.grid_size // 2),
             "blue": (self.grid_size - 2, self.grid_size // 2),
