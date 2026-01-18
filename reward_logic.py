@@ -2,7 +2,6 @@ from minigrid.core.world_object import Floor, Goal
 from world_object import Flag, Base
 import numpy as np
 
-
 def reward_policy(self, agent_id, rewards, actions, terminations, ):
         
     # 1. SETUP & SIMULATION
