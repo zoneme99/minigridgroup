@@ -17,7 +17,13 @@ class CaptureTheFlagPZ(ParallelEnv):
     def __init__(self, render_mode=None):
         # (4X)
         self.possible_agents = ["red_0", "red_1", "blue_0", "blue_2"]
-    
+
+        # Team definitions
+        self.teams = {
+        "red": ["red_0", "red_1"],
+        "blue": ["blue_0", "blue_2"],}
+
+
         self.agents = self.possible_agents[:]
         self.render_mode = render_mode
         self.reward_policy = reward_policy
@@ -140,6 +146,25 @@ class CaptureTheFlagPZ(ParallelEnv):
                         self.agent_pos[agent_id] = np.array([rx, ry])
                         self.spawn_pos[agent_id] = self.agent_pos[agent_id].copy()
                         break
+        
+
+        # ROLE ASSIGNMENT  (USES EXISTING self.teams)
+        self.roles = {}
+
+        for team, agents_in_team in self.teams.items():
+            f_pos = np.array(self.flag_pos[team])
+
+            a0, a1 = agents_in_team
+
+            dist0 = np.sum(np.abs(self.agent_pos[a0] - f_pos))
+            dist1 = np.sum(np.abs(self.agent_pos[a1] - f_pos))
+
+            if dist0 <= dist1:
+                self.roles[a0] = "defender"
+                self.roles[a1] = "attacker"
+            else:
+                self.roles[a0] = "attacker"
+                self.roles[a1] = "defender"                
 
         # (4x)
         # (!) Agent with Flag Collision 1/2

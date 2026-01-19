@@ -48,8 +48,8 @@ def reward_policy(self, agent_id, rewards, actions, terminations, ):
                     # We use Flag(my_team) because the enemy was carrying the flag they stole from me
                     self.env.grid.set(my_flag_home[0], my_flag_home[1], Flag(my_team))
                     
-                    rewards[agent_id] += 3.0  # Tagging reward (!) Original 5.0
-                    rewards[other_id] -= 2.0  # Penalty for being caught
+                    rewards[agent_id] += 10.0  # Tagging reward (!) Original 5.0
+                    rewards[other_id] -= 5.0  # Penalty for being caught
                 
                 # CASE B: It's a teammate or a non-flag-carrying enemy -> BLOCK
                 else:
@@ -60,6 +60,7 @@ def reward_policy(self, agent_id, rewards, actions, terminations, ):
     if collision_happened or is_camping:
         # Move failed, stay at old position
         self.agent_pos[agent_id] = old_pos
+        rewards[agent_id] -= 0.01  # Small penalty for failed move or collision <---- test change
     else:
         # Move succeeded
         self.agent_pos[agent_id] = new_pos
@@ -68,9 +69,85 @@ def reward_policy(self, agent_id, rewards, actions, terminations, ):
     
     # --- NEW CAPTURE LOGIC ---
     current_pos = tuple(self.agent_pos[agent_id])
-    enemy_flag_loc = self.flag_pos[enemy_team]
-    my_base_loc = self.flag_pos[my_team]
+    enemy_flag_loc = tuple(self.flag_pos[enemy_team])
+    my_base_loc = tuple(self.flag_pos[my_team])
 
+
+    # DEFENDER BEHAVIOR
+    if self.roles[agent_id] == "defender":
+
+        dist_to_own_flag = np.sum(np.abs(np.array(current_pos) - np.array(my_flag_pos)))
+
+        # Strong incentive to stay near own flag
+        if dist_to_own_flag <= 2:
+            rewards[agent_id] += 0.5
+        elif dist_to_own_flag <= 4:
+            rewards[agent_id] += 0.2
+        else:
+            rewards[agent_id] -= 0.1
+
+        # Extra reward for intercepting enemy carrier
+        for other_id in self.possible_agents:
+            if enemy_team in other_id and self.carrying_flag[other_id]:
+                dist_to_carrier = np.sum(np.abs(np.array(current_pos) - np.array(self.agent_pos[other_id])))
+                rewards[agent_id] += max(0, (6 - dist_to_carrier)) * 0.03
+
+
+
+    # ATTACKER BEHAVIOR
+    elif self.roles[agent_id] == "attacker":
+        
+        # Calculate distances
+        dist_to_enemy_flag = np.sum(np.abs(np.array(current_pos) - np.array(enemy_flag_loc)))
+        dist_to_my_base = np.sum(np.abs(np.array(current_pos) - np.array(my_base_loc)))
+        
+        # PHASE 1: Not carrying flag -> Reward moving toward enemy flag
+        if not self.carrying_flag[agent_id]:
+            # Check if enemy flag is still available (not already taken by teammate)
+            cell_item = self.env.grid.get(*enemy_flag_loc)
+            enemy_flag_available = (cell_item and cell_item.type == "goal")
+            
+            if enemy_flag_available:
+                # Reward getting closer to enemy flag
+                if dist_to_enemy_flag <= 2:
+                    rewards[agent_id] += 1.0  # Very close to target
+                elif dist_to_enemy_flag <= 5:
+                    rewards[agent_id] += 0.5  # Approaching target
+                elif dist_to_enemy_flag <= 10:
+                    rewards[agent_id] += 0.2  # Moving in right direction
+                
+                # Small penalty for moving away from enemy flag
+                if hasattr(self, 'prev_dist_to_enemy_flag') and agent_id in self.prev_dist_to_enemy_flag:
+                    if dist_to_enemy_flag > self.prev_dist_to_enemy_flag[agent_id]:
+                        rewards[agent_id] -= 0.02
+                
+                # Store current distance for next step
+                if not hasattr(self, 'prev_dist_to_enemy_flag'):
+                    self.prev_dist_to_enemy_flag = {}
+                self.prev_dist_to_enemy_flag[agent_id] = dist_to_enemy_flag
+        
+        # PHASE 2: Carrying flag -> Reward moving toward own base
+        else:
+            # Reward getting closer to home base
+            if dist_to_my_base <= 2:
+                rewards[agent_id] += 2.0  # Very close to scoring!
+            elif dist_to_my_base <= 5:
+                rewards[agent_id] += 1.0  # Making progress home
+            elif dist_to_my_base <= 10:
+                rewards[agent_id] += 0.5  # Heading back
+            
+            # Bonus for each step closer to base
+            if hasattr(self, 'prev_dist_to_base') and agent_id in self.prev_dist_to_base:
+                if dist_to_my_base < self.prev_dist_to_base[agent_id]:
+                    rewards[agent_id] += 0.05  # Got closer!
+            
+            # Store current distance for next step
+            if not hasattr(self, 'prev_dist_to_base'):
+                self.prev_dist_to_base = {}
+            self.prev_dist_to_base[agent_id] = dist_to_my_base
+
+
+    
     
     # 3. PICKUP LOGIC
     # Check if I am standing on the ENEMY flag
@@ -82,7 +159,7 @@ def reward_policy(self, agent_id, rewards, actions, terminations, ):
             self.carrying_flag[agent_id] = True
             # Remove flag from grid, replace with the Base object
             self.env.grid.set(*enemy_flag_loc, Base(enemy_team))
-            rewards[agent_id] += 5.0 # (!) Original 2.0
+            rewards[agent_id] += 10.0 # (!) Original 2.0
 
             # Optional: Small reward for the whole team for progress
             for a in self.agents:
@@ -93,7 +170,7 @@ def reward_policy(self, agent_id, rewards, actions, terminations, ):
     # Check if I am standing on MY base while carrying the ENEMY flag
     if current_pos == my_base_loc and self.carrying_flag[agent_id]:
         # VICTORY!
-        rewards[agent_id] += 25.0 # (!) Original 10
+        rewards[agent_id] += 50.0 # (!) Original 10
 
         # --- Respawn the scorer so they aren't blocking the base ---
         self.agent_pos[agent_id] = self.get_safe_spawn(agent_id)
@@ -102,7 +179,7 @@ def reward_policy(self, agent_id, rewards, actions, terminations, ):
         # TEAM REWARD: Everyone on the red team wins if red scores!
         for a in self.possible_agents:
             if my_team in a:
-                rewards[a] += 15.0 # (!) Original 5.0
+                rewards[a] += 30.0 # (!) Original 5.0
                 terminations[a] = True
             else:
                 terminations[a] = True # End game for losers too
