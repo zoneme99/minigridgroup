@@ -7,24 +7,24 @@ from minigrid.core.grid import Grid
 from minigrid.core.mission import MissionSpace
 from minigrid.core.world_object import Goal, Wall, Ball, Floor, Key
 from minigrid.minigrid_env import MiniGridEnv
-# IMPORT LOGIC & FLAG
-from reward_logic import reward_policy, handle_combat, Flag
+from reward_logic import reward_policy
+from world_object import Flag
 
 
 class CaptureTheFlagPZ(ParallelEnv):
     metadata = {"render_modes": ["human", "rgb_array"], "name": "ctf_v1"}
 
     def __init__(self, render_mode=None):
-        self.possible_agents = ["red", "blue"]
+        # (4X)
+        self.possible_agents = ["red_0", "red_1", "blue_0", "blue_2"]
+    
         self.agents = self.possible_agents[:]
         self.render_mode = render_mode
-
         self.reward_policy = reward_policy
-        self.handle_combat = handle_combat
 
-        # Map Settings
+        # Grid Params
         self.grid_size = 21
-        self.max_steps = 400
+        self.max_steps = 400  # Increased steps for the return trip
 
         self.mission_space = MissionSpace(
             mission_func=lambda: "Capture the enemy flag!"
@@ -36,8 +36,6 @@ class CaptureTheFlagPZ(ParallelEnv):
             mission_space=self.mission_space,
         )
 
-        self.spawn_pos = {}
-
     @functools.lru_cache(maxsize=None)
     def observation_space(self, agent):
         return Box(low=0, high=255, shape=(56, 56, 3), dtype=np.uint8)
@@ -47,27 +45,29 @@ class CaptureTheFlagPZ(ParallelEnv):
         return Discrete(3)
 
     def render(self):
-        saved_objs = []
+        saved_objs = {}
         for agent in self.agents:
             if agent in self.agent_pos:
                 pos = tuple(self.agent_pos[agent])
-                saved_objs.append((pos, self.env.grid.get(*pos)))
+                saved_objs[agent] = self.env.grid.get(*pos)
 
-        for agent in self.agents:
-            if agent in self.agent_pos:
-                pos = tuple(self.agent_pos[agent])
+                # (4x)
+                team_color = "red" if "red" in agent else "blue"
                 if self.carrying_flag.get(agent, False):
-                    self.env.grid.set(*pos, Key(agent))
+                    self.env.grid.set(*pos, Key(team_color)) # Use team color
                 else:
-                    self.env.grid.set(*pos, Ball(agent))
+                    self.env.grid.set(*pos, Ball(team_color)) # Use team color
 
         original_agent_pos = self.env.agent_pos
         self.env.agent_pos = (-1, -1)
         img = self.env.get_frame(highlight=False, tile_size=8)
-        self.env.agent_pos = original_agent_pos
 
-        for pos, obj in reversed(saved_objs):
-            self.env.grid.set(*pos, obj)
+        self.env.agent_pos = original_agent_pos
+        for agent in self.agents:
+            if agent in self.agent_pos:
+                pos = tuple(self.agent_pos[agent])
+                self.env.grid.set(*pos, saved_objs[agent])
+
         return img
 
     def reset(self, seed=None, options=None):
@@ -78,7 +78,7 @@ class CaptureTheFlagPZ(ParallelEnv):
 
         self.env.step_count = 0
         self.env.mission = self.mission_space.sample()
-        self.carrying_flag = {"red": False, "blue": False}
+        self.carrying_flag = {agent: False for agent in self.possible_agents}
 
         # 1. Grid
         self.env.grid = Grid(self.grid_size, self.grid_size)
@@ -88,10 +88,7 @@ class CaptureTheFlagPZ(ParallelEnv):
         mid_x = self.grid_size // 2
         for i in range(1, self.grid_size - 1):
             for j in range(1, self.grid_size - 1):
-                if i < mid_x:
-                    self.env.grid.set(i, j, Floor("red"))
-                elif i > mid_x:
-                    self.env.grid.set(i, j, Floor("blue"))
+                self.env.grid.set(i, j, Floor("red" if i < mid_x else "blue"))
 
         # 3. Center Spine
         for y in range(1, self.grid_size - 1):
@@ -114,7 +111,7 @@ class CaptureTheFlagPZ(ParallelEnv):
                 self.env.grid.set(mirror_x, y, Wall())
                 num_pairs += 1
 
-        # 5. Flags
+        # 5. Place Flags
         self.flag_pos = {
             "red": (1, self.grid_size // 2),
             "blue": (self.grid_size - 2, self.grid_size // 2),
@@ -122,59 +119,103 @@ class CaptureTheFlagPZ(ParallelEnv):
         self.env.grid.set(*self.flag_pos["red"], Flag("red"))
         self.env.grid.set(*self.flag_pos["blue"], Flag("blue"))
 
-        # 6. Spawns - FIXED POSITIONS
-        # Calculate the middle row
-        mid_y = self.grid_size // 2
-
+        # (4x)
+        # 4. Spawns
         self.agent_pos = {}
-        # Red faces East (0), Blue faces West (2)
-        self.agent_dir = {"red": 0, "blue": 2}
+        self.agent_dir = {}
+        self.spawn_pos = {}
 
-        self.last_positions = {"red": (-1, -1), "blue": (-1, -1)}
-        self.idle_counts = {"red": 0, "blue": 0}
+        for agent_id in self.possible_agents:
+            # Determine team based on name (e.g., "red_0" -> "red")
+            team = "red" if "red" in agent_id else "blue"
+            self.agent_dir[agent_id] = 0 if team == "red" else 2
+            
+            # Find a valid spawn point for this specific agent
+            while True:
+                ry = np.random.randint(1, self.grid_size - 1)
+                rx = 2 if team == "red" else self.grid_size - 3
+                if self.env.grid.get(rx, ry).type == "floor":
+                    # Check if another agent already spawned here to avoid overlap
+                    if not any(np.array_equal(np.array([rx, ry]), p) for p in self.agent_pos.values()):
+                        self.agent_pos[agent_id] = np.array([rx, ry])
+                        self.spawn_pos[agent_id] = self.agent_pos[agent_id].copy()
+                        break
 
-        # Force clear the spawn tiles (just in case random walls hit them)
-        # Red Base (Left)
-        self.env.grid.set(2, mid_y, Floor("red"))
-        self.spawn_pos["red"] = np.array([2, mid_y])
-        self.agent_pos["red"] = np.array([2, mid_y])
-
-        # Blue Base (Right)
-        self.env.grid.set(self.grid_size - 3, mid_y, Floor("blue"))
-        self.spawn_pos["blue"] = np.array([self.grid_size - 3, mid_y])
-        self.agent_pos["blue"] = np.array([self.grid_size - 3, mid_y])
-
-        self.env.agent_pos = self.agent_pos["red"]
-        self.env.agent_dir = self.agent_dir["red"]
+        # (4x)
+        # (!) Agent with Flag Collision 1/2
+        # Save initial spawn positions so we can return agents here later
+        # We must use .copy() so the spawn point doesn't move when the agent moves
+        self.spawn_pos = {
+            agent_id: self.agent_pos[agent_id].copy() 
+            for agent_id in self.possible_agents
+        }
 
         return self._get_observations(), {}
 
+    # (4x)
     def _get_observations(self):
         observations = {}
-        for agent_id in self.agents:
-            me = agent_id
-            enemy = "blue" if me == "red" else "red"
+        for me in self.agents:
+            # We need to render ALL OTHER agents so 'me' can see them
+            saved_objs = {}
+            for other in self.agents:
+                if other == me: continue
+                
+                pos = tuple(self.agent_pos[other])
+                saved_objs[pos] = self.env.grid.get(*pos)
+                
+                # Render the other agent as a Ball
+                team_color = "red" if "red" in other else "blue"
+                # (!) This works
+                # self.env.grid.set(*pos, Ball(team_color))
+                
+                # (!) This maybe doesn't work 
+                #     it's suppose to make the AI see an enemy 
+                #     carrying a flag as a key as well
+                if self.carrying_flag.get(other, False):
+                    self.env.grid.set(*pos, Key(team_color))
+                else:
+                    self.env.grid.set(*pos, Ball(team_color))
 
-            if enemy in self.agent_pos:
-                enemy_pos = tuple(self.agent_pos[enemy])
-                prev_obj = self.env.grid.get(*enemy_pos)
-                if prev_obj is None or prev_obj.type == "floor":
-                    if self.carrying_flag[enemy]:
-                        self.env.grid.set(*enemy_pos, Key(enemy))
-                    else:
-                        self.env.grid.set(*enemy_pos, Ball(enemy))
-
+            # Render the POV for the current agent
             self.env.agent_pos = self.agent_pos[me]
             self.env.agent_dir = self.agent_dir[me]
             observations[me] = self.env.get_pov_render(tile_size=8)
 
-            if enemy in self.agent_pos:
-                self.env.grid.set(*enemy_pos, prev_obj)
+            # Cleanup the grid for the next agent's observation
+            for pos, obj in saved_objs.items():
+                self.env.grid.set(*pos, obj)
 
         return observations
 
+    # (4)
+    def get_safe_spawn(self, agent_id):
+        """Finds the spawn point or the closest available empty floor tile."""
+        base_spawn = tuple(self.spawn_pos[agent_id])
+        
+        # If the exact spawn is empty, return it
+        if not any(np.array_equal(base_spawn, p) for p in self.agent_pos.values()):
+            return np.array(base_spawn)
+        
+        # Otherwise, search outward for the nearest Floor tile
+        for radius in range(1, 4):
+            for dx in range(-radius, radius + 1):
+                for dy in range(-radius, radius + 1):
+                    check_pos = (base_spawn[0] + dx, base_spawn[1] + dy)
+                    
+                    # Check if within grid bounds
+                    if 0 < check_pos[0] < self.grid_size and 0 < check_pos[1] < self.grid_size:
+                        cell = self.env.grid.get(*check_pos)
+                        # Must be floor and not occupied by anyone else
+                        if cell and cell.type == "floor":
+                            if not any(np.array_equal(check_pos, p) for p in self.agent_pos.values()):
+                                return np.array(check_pos)
+                                
+        return np.array(base_spawn) # Fallback
+
+
     def step(self, actions):
-        rewards = {a: 0.0 for a in self.agents}
+        rewards = {a: -0.01 for a in self.agents}
         terminations = {a: False for a in self.agents}
         truncations = {a: False for a in self.agents}
         infos = {a: {} for a in self.agents}
@@ -184,15 +225,15 @@ class CaptureTheFlagPZ(ParallelEnv):
         for agent_id in self.agents:
             if agent_id not in actions:
                 continue
-            self.reward_policy(self, agent_id, rewards, actions, terminations)
 
-        self.handle_combat(self, rewards)
+            self.reward_policy(self, agent_id, rewards, actions, terminations)
 
         if self.steps >= self.max_steps:
             for a in self.agents:
                 truncations[a] = True
 
         observations = self._get_observations()
+
         if any(terminations.values()) or any(truncations.values()):
             self.agents = []
 

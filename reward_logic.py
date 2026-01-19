@@ -1,111 +1,108 @@
-from minigrid.core.world_object import Floor, Goal
+from minigrid.core.world_object import Floor, Goal 
+from world_object import Flag, Base
+import numpy as np
 
-# --- CLASS DEFINITIONS ---
-# Included here so the Environment can import it for respawning flags
-
-
-class Flag(Goal):
-    def __init__(self, color):
-        super().__init__()
-        self.color = color
-
-
-def reward_policy(env, agent_id, rewards, actions, terminations):
-    """
-    NEUTRAL / BALANCED REWARD SCHEME
-    A fair starting point for the group. 
-    """
-
-    # --- DOCUMENTATION (From Main Branch) ---
-    # env.agent_pos: Dictionary with keys for each agent, giving their (x, y) positions.
-    # env.agent_dir: Dictionary, giving facing direction (int) for each agent.
-    # env.carrying_flag: Dictionary, True if the agent is carrying a flag.
-    # env.flag_pos: Dictionary, position of each team's flag.
-    # env.steps: Current time step (int).
-    # env.grid_size: Grid dimensions.
-    # env.spawn_pos: Original spawn positions for each agent.
-    # env.max_steps: Maximum steps per episode.
-    # actions: Dictionary of last actions.
-
-    # 1. THE EXISTENCE TAX
-    # Small penalty to encourage movement, but low enough to allow some patience.
-    rewards[agent_id] -= 0.01
-
-    # 2. HEAVY FLAG PENALTY (Disabled for Neutral Start)
-    # Uncomment this if you want to force the carrier to rush home.
-    # if env.carrying_flag[agent_id]:
-    #    rewards[agent_id] -= 0.1
-
-    # 3. EXECUTE MOVEMENT (Physics)
-    # We update the environment state here.
+def reward_policy(self, agent_id, rewards, actions, terminations, ):
+        
+    # 1. SETUP & SIMULATION
     action = actions[agent_id]
-    env.env.agent_pos = env.agent_pos[agent_id]
-    env.env.agent_dir = env.agent_dir[agent_id]
-    env.env.step(action)
-    env.agent_pos[agent_id] = env.env.agent_pos
-    env.agent_dir[agent_id] = env.env.agent_dir
+    my_team = "red" if "red" in agent_id else "blue"
+    enemy_team = "blue" if my_team == "red" else "red"
 
-    # 4. IDLE PENALTY (Anti-Camping)
-    # Prevents agents from freezing in place due to bugs or bad training.
-    current_pos = tuple(env.env.agent_pos)
+    # Capture state BEFORE move
+    old_pos = np.array(self.agent_pos[agent_id])
 
-    # Initialize tracking if not present (Safety check)
-    if not hasattr(env, "last_positions"):
-        env.last_positions = {a: (-1, -1) for a in env.agents}
-        env.idle_counts = {a: 0 for a in env.agents}
+    # Simulate move in the underlying MiniGrid
+    self.env.agent_pos = old_pos
+    self.env.agent_dir = self.agent_dir[agent_id]
+    self.env.step(action)
+    
+    # Capture results of simulation
+    new_pos = np.array(self.env.agent_pos)
+    new_dir = self.env.agent_dir
 
-    if current_pos == env.last_positions[agent_id]:
-        env.idle_counts[agent_id] += 1
+    # Finalize Position
+    current_pos_tuple = tuple(new_pos)
+    my_flag_pos = tuple(self.flag_pos[my_team])
+    is_camping = (current_pos_tuple == my_flag_pos and not self.carrying_flag[agent_id])
+
+
+    # 2. CHECK FOR COLLISIONS WITH OTHER PLAYERS
+    collision_happened = False
+    if is_camping: 
+        collision_happened = True
     else:
-        env.idle_counts[agent_id] = 0
-        env.last_positions[agent_id] = current_pos
-
-    # If stuck for 10 steps, apply a gentle nudge penalty
-    if env.idle_counts[agent_id] > 10:
-        rewards[agent_id] -= 0.1
-
-    # --- OBJECTIVE LOGIC ---
-    enemy = "blue" if agent_id == "red" else "red"
-    enemy_flag_loc = env.flag_pos[enemy]
-    my_base_loc = env.flag_pos[agent_id]
-
-    # 5. PICKUP REWARD (+1.0)
-    # Matches Main Branch. A small bonus to acknowledge the milestone.
-    if current_pos == enemy_flag_loc and not env.carrying_flag[agent_id]:
-        env.carrying_flag[agent_id] = True
-        env.env.grid.set(*enemy_flag_loc, Floor(enemy))
-        rewards[agent_id] += 1.0
-
-    # 6. VICTORY REWARD (+10.0)
-    # Matches Main Branch. The primary goal.
-    if current_pos == my_base_loc and env.carrying_flag[agent_id]:
-        rewards[agent_id] += 10.0
-        for a in env.agents:
-            terminations[a] = True
+        for other_id in self.possible_agents:
+            if other_id == agent_id: continue
+            
+            if np.array_equal(new_pos, self.agent_pos[other_id]):
+                # CASE A: It's the enemy flag carrier -> TAG!
+                if (enemy_team in other_id) and self.carrying_flag[other_id]:
+                                
+                    # A. Reset the carrier
+                    self.agent_pos[other_id] = self.get_safe_spawn(other_id)
+                    self.carrying_flag[other_id] = False
+                    
+                    # B. Reset the flag back to MY home (since the enemy was carrying it)
+                    my_flag_home = self.flag_pos[my_team]
+                    # We use Flag(my_team) because the enemy was carrying the flag they stole from me
+                    self.env.grid.set(my_flag_home[0], my_flag_home[1], Flag(my_team))
+                    
+                    rewards[agent_id] += 3.0  # Tagging reward (!) Original 5.0
+                    rewards[other_id] -= 2.0  # Penalty for being caught
+                
+                # CASE B: It's a teammate or a non-flag-carrying enemy -> BLOCK
+                else:
+                    collision_happened = True
+                    break
 
 
-def handle_combat(env, rewards):
-    """
-    Handles Collision and Tagging.
-    """
-    # Only run if both agents are alive
-    if "red" in env.agent_pos and "blue" in env.agent_pos:
-        red_p = tuple(env.agent_pos["red"])
-        blue_p = tuple(env.agent_pos["blue"])
+    if collision_happened or is_camping:
+        # Move failed, stay at old position
+        self.agent_pos[agent_id] = old_pos
+    else:
+        # Move succeeded
+        self.agent_pos[agent_id] = new_pos
+        self.agent_dir[agent_id] = new_dir
 
-        if red_p == blue_p:
-            for carrier, tagger in [("red", "blue"), ("blue", "red")]:
-                if env.carrying_flag[carrier]:
-                    # 7. COMBAT REWARDS (Zero-Sum)
-                    # The Carrier loses exactly what the Tagger gains.
-                    # This is fair and neutral.
-                    rewards[carrier] -= 5.0
-                    rewards[tagger] += 5.0
+    
+    # --- NEW CAPTURE LOGIC ---
+    current_pos = tuple(self.agent_pos[agent_id])
+    enemy_flag_loc = self.flag_pos[enemy_team]
+    my_base_loc = self.flag_pos[my_team]
 
-                    # Reset Carrier
-                    env.carrying_flag[carrier] = False
-                    env.agent_pos[carrier] = env.spawn_pos[carrier].copy()
+    
+    # 3. PICKUP LOGIC
+    # Check if I am standing on the ENEMY flag
+    if current_pos == enemy_flag_loc and not self.carrying_flag[agent_id]:
+        # Is the flag actually there? (Has another teammate already taken it?)
+        # We check the grid cell type to be sure
+        cell_item = self.env.grid.get(*enemy_flag_loc)
+        if cell_item and cell_item.type == "goal": 
+            self.carrying_flag[agent_id] = True
+            # Remove flag from grid, replace with the Base object
+            self.env.grid.set(*enemy_flag_loc, Base(enemy_team))
+            rewards[agent_id] += 5.0 # (!) Original 2.0
 
-                    # Return Flag to Base
-                    flag_home = env.flag_pos[tagger]
-                    env.env.grid.set(*flag_home, Flag(tagger))
+            # Optional: Small reward for the whole team for progress
+            for a in self.agents:
+                if my_team in a and a != agent_id:
+                    rewards[a] += 2 # (!) Original 0.5
+    
+    # 4. RETURN & WIN LOGIC
+    # Check if I am standing on MY base while carrying the ENEMY flag
+    if current_pos == my_base_loc and self.carrying_flag[agent_id]:
+        # VICTORY!
+        rewards[agent_id] += 25.0 # (!) Original 10
+
+        # --- Respawn the scorer so they aren't blocking the base ---
+        self.agent_pos[agent_id] = self.get_safe_spawn(agent_id)
+        self.carrying_flag[agent_id] = False # Drop the flag status
+
+        # TEAM REWARD: Everyone on the red team wins if red scores!
+        for a in self.possible_agents:
+            if my_team in a:
+                rewards[a] += 15.0 # (!) Original 5.0
+                terminations[a] = True
+            else:
+                terminations[a] = True # End game for losers too
