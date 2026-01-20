@@ -1,7 +1,8 @@
+from collections import deque
 import functools
 import gymnasium as gym
 import numpy as np
-from gymnasium.spaces import Discrete, Box
+from gymnasium.spaces import Discrete, Box, Dict
 from pettingzoo import ParallelEnv
 from minigrid.core.grid import Grid
 from minigrid.core.mission import MissionSpace
@@ -22,6 +23,9 @@ class CaptureTheFlagPZ(ParallelEnv):
         self.teams = {
         "red": ["red_0", "red_1"],
         "blue": ["blue_0", "blue_2"],}
+
+        self.stack_size = 3
+        self.frames ={agent: deque(maxlen=self.stack_size) for agent in self.possible_agents}
 
 
         self.agents = self.possible_agents[:]
@@ -44,7 +48,10 @@ class CaptureTheFlagPZ(ParallelEnv):
 
     @functools.lru_cache(maxsize=None)
     def observation_space(self, agent):
-        return Box(low=0, high=255, shape=(56, 56, 3), dtype=np.uint8)
+        return gym.spaces.Dict({
+        "image": Box(low=0, high=255, shape=(9, 84, 84), dtype=np.uint8),
+        "role": Box(low=0.0, high=1.0, shape=(1,), dtype=np.float32)  # 0: Attacker, 1: Defender
+    })
 
     @functools.lru_cache(maxsize=None)
     def action_space(self, agent):
@@ -175,6 +182,10 @@ class CaptureTheFlagPZ(ParallelEnv):
             for agent_id in self.possible_agents
         }
 
+        # Töm kön vid varje reset så att gammal info från förra rundan inte hänger kvar
+        self.frames = {agent: deque(maxlen=self.stack_size) for agent in self.possible_agents}
+        
+
         return self._get_observations(), {}
 
     # (4x)
@@ -205,7 +216,29 @@ class CaptureTheFlagPZ(ParallelEnv):
             # Render the POV for the current agent
             self.env.agent_pos = self.agent_pos[me]
             self.env.agent_dir = self.agent_dir[me]
-            observations[me] = self.env.get_pov_render(tile_size=8)
+            
+            # tile_size=12 ger 84x84 pixlar
+            pov_img = self.env.get_pov_render(tile_size=12) # Ger (84, 84, 3)
+            # Transponera från (H, W, C) till (C, H, W)
+            pov_img = np.transpose(pov_img, (2, 0, 1))
+            # 2. Hantera Frame Stacking manuellt
+            if len(self.frames[me]) == 0:
+                # Vid första steget, fyll stacken med kopior av första bilden
+                for _ in range(self.stack_size):
+                    self.frames[me].append(pov_img)
+            else:
+                self.frames[me].append(pov_img)
+
+            # Slå ihop de 3 bilderna till en (9, 84, 84) tensor
+            stacked_img = np.concatenate(list(self.frames[me]), axis=0)
+
+            # --- SKAPA DICT-OBSERVATIONEN ---
+            role_id = 0 if self.roles[me] == "attacker" else 1
+            
+            observations[me] = {
+                "image": stacked_img,
+                "role": np.array([role_id], dtype=np.float32)
+            }
 
             # Cleanup the grid for the next agent's observation
             for pos, obj in saved_objs.items():
