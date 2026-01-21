@@ -14,17 +14,23 @@ from world_object import Flag
 class CaptureTheFlagPZ(ParallelEnv):
     metadata = {"render_modes": ["human", "rgb_array"], "name": "ctf_v1"}
 
-    def __init__(self, render_mode=None):
-        # (4X)
+    def __init__(self, render_mode=None, grid_size=21, center_walls=2, mirrored_walls=15):
+        
         self.possible_agents = ["red_0", "red_1", "blue_0", "blue_2"]
     
         self.agents = self.possible_agents[:]
         self.render_mode = render_mode
         self.reward_policy = reward_policy
 
-        # Grid Params
-        self.grid_size = 21
-        self.max_steps = 400  # Increased steps for the return trip
+        # Grid Hyper Parameters
+        self.max_steps = grid_size*20 # Dynamic Scaling
+        self.grid_size = grid_size 
+        self.center_walls = center_walls # The higher the number the fewer the walls  
+        self.mirrored_walls = mirrored_walls # The lower the number the fewer walls
+        # Example 
+        # First Training  (Easy) grid_size 12x12, center_walls 6, mirrored_walls 2 
+        # Second Training (Medium) grid_size 16x16, center_walls 4, mirrored_walls 8 
+        # Third Training  (Difficult/Default) grid_size 21x21, center_walls 2, mirrored_walls 15 
 
         self.mission_space = MissionSpace(
             mission_func=lambda: "Capture the enemy flag!"
@@ -45,13 +51,14 @@ class CaptureTheFlagPZ(ParallelEnv):
         return Discrete(3)
 
     def render(self):
+        """Render what we, the observer, sees."""
         saved_objs = {}
         for agent in self.agents:
             if agent in self.agent_pos:
                 pos = tuple(self.agent_pos[agent])
                 saved_objs[agent] = self.env.grid.get(*pos)
 
-                # (4x)
+                
                 team_color = "red" if "red" in agent else "blue"
                 if self.carrying_flag.get(agent, False):
                     self.env.grid.set(*pos, Key(team_color)) # Use team color
@@ -92,12 +99,12 @@ class CaptureTheFlagPZ(ParallelEnv):
 
         # 3. Center Spine
         for y in range(1, self.grid_size - 1):
-            if y % 2 == 0:
+            if y % self.center_walls == 0:
                 self.env.grid.set(mid_x, y, Wall())
 
         # 4. Mirrored Obstacles
         num_pairs = 0
-        target_pairs = 15
+        target_pairs = self.mirrored_walls
         while num_pairs < target_pairs:
             x = np.random.randint(1, mid_x)
             y = np.random.randint(1, self.grid_size - 1)
@@ -119,7 +126,7 @@ class CaptureTheFlagPZ(ParallelEnv):
         self.env.grid.set(*self.flag_pos["red"], Flag("red"))
         self.env.grid.set(*self.flag_pos["blue"], Flag("blue"))
 
-        # (4x)
+        
         # 4. Spawns
         self.agent_pos = {}
         self.agent_dir = {}
@@ -141,10 +148,7 @@ class CaptureTheFlagPZ(ParallelEnv):
                         self.spawn_pos[agent_id] = self.agent_pos[agent_id].copy()
                         break
 
-        # (4x)
-        # (!) Agent with Flag Collision 1/2
         # Save initial spawn positions so we can return agents here later
-        # We must use .copy() so the spawn point doesn't move when the agent moves
         self.spawn_pos = {
             agent_id: self.agent_pos[agent_id].copy() 
             for agent_id in self.possible_agents
@@ -152,8 +156,9 @@ class CaptureTheFlagPZ(ParallelEnv):
 
         return self._get_observations(), {}
 
-    # (4x)
+
     def _get_observations(self):
+        """Renders what the agent sees."""
         observations = {}
         for me in self.agents:
             # We need to render ALL OTHER agents so 'me' can see them
@@ -166,12 +171,8 @@ class CaptureTheFlagPZ(ParallelEnv):
                 
                 # Render the other agent as a Ball
                 team_color = "red" if "red" in other else "blue"
-                # (!) This works
-                # self.env.grid.set(*pos, Ball(team_color))
-                
-                # (!) This maybe doesn't work 
-                #     it's suppose to make the AI see an enemy 
-                #     carrying a flag as a key as well
+
+                # Render the enemy agent carrying the flag as a key
                 if self.carrying_flag.get(other, False):
                     self.env.grid.set(*pos, Key(team_color))
                 else:
@@ -188,7 +189,7 @@ class CaptureTheFlagPZ(ParallelEnv):
 
         return observations
 
-    # (4)
+    
     def get_safe_spawn(self, agent_id):
         """Finds the spawn point or the closest available empty floor tile."""
         base_spawn = tuple(self.spawn_pos[agent_id])
