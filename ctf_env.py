@@ -17,13 +17,14 @@ class CaptureTheFlagPZ(ParallelEnv):
 
     def __init__(self, render_mode=None):
         # (4X)
-        self.possible_agents = ["red_0", "red_1", "blue_0", "blue_2"]
+        self.possible_agents = ["red_1", "red_2", "blue_1", "blue_2"]
 
         # Team definitions
         self.teams = {
-        "red": ["red_0", "red_1"],
-        "blue": ["blue_0", "blue_2"],}
+        "red": ["red_1", "red_2"],
+        "blue": ["blue_1", "blue_2"],}
 
+        # Frame Stacking
         self.stack_size = 3
         self.frames ={agent: deque(maxlen=self.stack_size) for agent in self.possible_agents}
 
