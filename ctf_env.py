@@ -33,8 +33,8 @@ class CaptureTheFlagPZ(ParallelEnv):
         self.reward_policy = reward_policy
 
         # Grid Params
-        self.grid_size = 21
-        self.max_steps = 400  # Increased steps for the return trip
+        self.grid_size = 21 # otherwise 21
+        self.max_steps = 800  # Increased steps for the return trip
 
         self.mission_space = MissionSpace(
             mission_func=lambda: "Capture the enemy flag!"
