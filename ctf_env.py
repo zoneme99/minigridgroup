@@ -41,6 +41,15 @@ class CaptureTheFlagPZ(ParallelEnv):
             max_steps=self.max_steps,
             mission_space=self.mission_space,
         )
+    
+    # Add this property to satisfy the SB3 check
+    @property
+    def render_mode(self):
+        return self._render_mode
+
+    @render_mode.setter
+    def render_mode(self, value):
+        self._render_mode = value
 
     @functools.lru_cache(maxsize=None)
     def observation_space(self, agent):
@@ -154,7 +163,7 @@ class CaptureTheFlagPZ(ParallelEnv):
             for agent_id in self.possible_agents
         }
 
-        return self._get_observations(), {}
+        return self._get_observations(), {agent: {} for agent in self.possible_agents}
 
 
     def _get_observations(self):
