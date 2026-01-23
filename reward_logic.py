@@ -3,8 +3,19 @@ from world_object import Flag, Base
 import numpy as np
 
 def reward_policy(self, agent_id, rewards, actions, terminations, ):
-        
-    # 1. SETUP & SIMULATION
+
+    # 1. HYPERPARAMETERS
+    # --- Reward ---
+    TAGGING_ENEMY = 3 
+    PICKUP_FLAG = 5
+    PICKUP_FLAG_TEAM = 2
+    SCORE_FLAG = 25 
+    SCORE_FLAG_TEAM = 15
+
+    # --- Penalty ---
+    GETTING_TAGGED = 2
+
+    # 2. SETUP & SIMULATION
     action = actions[agent_id]
     my_team = "red" if "red" in agent_id else "blue"
     enemy_team = "blue" if my_team == "red" else "red"
@@ -27,7 +38,7 @@ def reward_policy(self, agent_id, rewards, actions, terminations, ):
     is_camping = (current_pos_tuple == my_flag_pos and not self.carrying_flag[agent_id])
 
 
-    # 2. CHECK FOR COLLISIONS WITH OTHER PLAYERS
+    # 3. CHECK FOR COLLISIONS WITH OTHER PLAYERS
     collision_happened = False
     if is_camping: 
         collision_happened = True
@@ -48,8 +59,8 @@ def reward_policy(self, agent_id, rewards, actions, terminations, ):
                     # We use Flag(my_team) because the enemy was carrying the flag they stole from me
                     self.env.grid.set(my_flag_home[0], my_flag_home[1], Flag(my_team))
                     
-                    rewards[agent_id] += 3.0  # Tagging reward (!) Original 5.0
-                    rewards[other_id] -= 2.0  # Penalty for being caught
+                    rewards[agent_id] += TAGGING_ENEMY  # Tagging reward (!) Original 5.0
+                    rewards[other_id] -= GETTING_TAGGED # Penalty for being caught
                 
                 # CASE B: It's a teammate or a non-flag-carrying enemy -> BLOCK
                 else:
@@ -72,7 +83,7 @@ def reward_policy(self, agent_id, rewards, actions, terminations, ):
     my_base_loc = self.flag_pos[my_team]
 
     
-    # 3. PICKUP LOGIC
+    # 4. PICKUP LOGIC
     # Check if I am standing on the ENEMY flag
     if current_pos == enemy_flag_loc and not self.carrying_flag[agent_id]:
         # Is the flag actually there? (Has another teammate already taken it?)
@@ -82,18 +93,18 @@ def reward_policy(self, agent_id, rewards, actions, terminations, ):
             self.carrying_flag[agent_id] = True
             # Remove flag from grid, replace with the Base object
             self.env.grid.set(*enemy_flag_loc, Base(enemy_team))
-            rewards[agent_id] += 5.0 # (!) Original 2.0
+            rewards[agent_id] += PICKUP_FLAG # (!) Original 2.0
 
             # Optional: Small reward for the whole team for progress
             for a in self.agents:
                 if my_team in a and a != agent_id:
-                    rewards[a] += 2 # (!) Original 0.5
+                    rewards[a] += PICKUP_FLAG_TEAM # (!) Original 0.5
     
-    # 4. RETURN & WIN LOGIC
+    # 5. RETURN & WIN LOGIC
     # Check if I am standing on MY base while carrying the ENEMY flag
     if current_pos == my_base_loc and self.carrying_flag[agent_id]:
         # VICTORY!
-        rewards[agent_id] += 25.0 # (!) Original 10
+        rewards[agent_id] += SCORE_FLAG # (!) Original 10
 
         # --- Respawn the scorer so they aren't blocking the base ---
         self.agent_pos[agent_id] = self.get_safe_spawn(agent_id)
@@ -101,8 +112,8 @@ def reward_policy(self, agent_id, rewards, actions, terminations, ):
 
         # TEAM REWARD: Everyone on the red team wins if red scores!
         for a in self.possible_agents:
-            if my_team in a:
-                rewards[a] += 15.0 # (!) Original 5.0
+            if my_team in a and a != agent_id:
+                rewards[a] += SCORE_FLAG_TEAM # (!) Original 5.0
                 terminations[a] = True
             else:
                 terminations[a] = True # End game for losers too

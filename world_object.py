@@ -1,5 +1,5 @@
 from minigrid.core.world_object import Goal
-# (!) Box_Token to destinguise it from Gymnasium Box
+# (!) Named Box_Token to destinguise it from Gymnasium Box
 from minigrid.core.world_object import Box as Box_Token 
 
 class Flag(Goal):
