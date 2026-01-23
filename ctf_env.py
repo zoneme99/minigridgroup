@@ -1,7 +1,8 @@
+from collections import deque
 import functools
 import gymnasium as gym
 import numpy as np
-from gymnasium.spaces import Discrete, Box
+from gymnasium.spaces import Discrete, Box, Dict
 from pettingzoo import ParallelEnv
 from minigrid.core.grid import Grid
 from minigrid.core.mission import MissionSpace
@@ -14,14 +15,32 @@ from world_object import Flag
 class CaptureTheFlagPZ(ParallelEnv):
     metadata = {"render_modes": ["human", "rgb_array"], "name": "ctf_v1"}
 
+<<<<<<< HEAD
     def __init__(self, render_mode=None, grid_size=21, center_walls=2, mirrored_walls=15):
         
         self.possible_agents = ["red_0", "red_1", "blue_0", "blue_2"]
     
+=======
+    def __init__(self, render_mode=None):
+        # (4X)
+        self.possible_agents = ["red_1", "red_2", "blue_1", "blue_2"]
+
+        # Team definitions
+        self.teams = {
+        "red": ["red_1", "red_2"],
+        "blue": ["blue_1", "blue_2"],}
+
+        # Frame Stacking
+        self.stack_size = 3
+        self.frames ={agent: deque(maxlen=self.stack_size) for agent in self.possible_agents}
+
+
+>>>>>>> main
         self.agents = self.possible_agents[:]
         self.render_mode = render_mode
         self.reward_policy = reward_policy
 
+<<<<<<< HEAD
         # Grid Hyper Parameters
         self.max_steps = grid_size*20 # Dynamic Scaling
         self.grid_size = grid_size 
@@ -31,6 +50,11 @@ class CaptureTheFlagPZ(ParallelEnv):
         # First Training  (Easy) grid_size 12x12, center_walls 6, mirrored_walls 2 
         # Second Training (Medium) grid_size 16x16, center_walls 4, mirrored_walls 8 
         # Third Training  (Difficult/Default) grid_size 21x21, center_walls 2, mirrored_walls 15 
+=======
+        # Grid Params
+        self.grid_size = 17 # otherwise 21
+        self.max_steps = 800  # Increased steps for the return trip
+>>>>>>> main
 
         self.mission_space = MissionSpace(
             mission_func=lambda: "Capture the enemy flag!"
@@ -53,7 +77,10 @@ class CaptureTheFlagPZ(ParallelEnv):
 
     @functools.lru_cache(maxsize=None)
     def observation_space(self, agent):
-        return Box(low=0, high=255, shape=(56, 56, 3), dtype=np.uint8)
+        return gym.spaces.Dict({
+        "image": Box(low=0, high=255, shape=(9, 84, 84), dtype=np.uint8),
+        "role": Box(low=0.0, high=1.0, shape=(1,), dtype=np.float32)  # 0: Attacker, 1: Defender
+    })
 
     @functools.lru_cache(maxsize=None)
     def action_space(self, agent):
@@ -113,7 +140,11 @@ class CaptureTheFlagPZ(ParallelEnv):
 
         # 4. Mirrored Obstacles
         num_pairs = 0
+<<<<<<< HEAD
         target_pairs = self.mirrored_walls
+=======
+        target_pairs = 10
+>>>>>>> main
         while num_pairs < target_pairs:
             x = np.random.randint(1, mid_x)
             y = np.random.randint(1, self.grid_size - 1)
@@ -156,6 +187,25 @@ class CaptureTheFlagPZ(ParallelEnv):
                         self.agent_pos[agent_id] = np.array([rx, ry])
                         self.spawn_pos[agent_id] = self.agent_pos[agent_id].copy()
                         break
+        
+
+        # ROLE ASSIGNMENT  (USES EXISTING self.teams)
+        self.roles = {}
+
+        for team, agents_in_team in self.teams.items():
+            f_pos = np.array(self.flag_pos[team])
+
+            a0, a1 = agents_in_team
+
+            dist0 = np.sum(np.abs(self.agent_pos[a0] - f_pos))
+            dist1 = np.sum(np.abs(self.agent_pos[a1] - f_pos))
+
+            if dist0 <= dist1:
+                self.roles[a0] = "defender"
+                self.roles[a1] = "attacker"
+            else:
+                self.roles[a0] = "attacker"
+                self.roles[a1] = "defender"                
 
         # Save initial spawn positions so we can return agents here later
         self.spawn_pos = {
@@ -163,8 +213,16 @@ class CaptureTheFlagPZ(ParallelEnv):
             for agent_id in self.possible_agents
         }
 
+<<<<<<< HEAD
         return self._get_observations(), {agent: {} for agent in self.possible_agents}
 
+=======
+        # Töm kön vid varje reset så att gammal info från förra rundan inte hänger kvar
+        self.frames = {agent: deque(maxlen=self.stack_size) for agent in self.possible_agents}
+        
+
+        return self._get_observations(), {}
+>>>>>>> main
 
     def _get_observations(self):
         """Renders what the agent sees."""
@@ -190,7 +248,29 @@ class CaptureTheFlagPZ(ParallelEnv):
             # Render the POV for the current agent
             self.env.agent_pos = self.agent_pos[me]
             self.env.agent_dir = self.agent_dir[me]
-            observations[me] = self.env.get_pov_render(tile_size=8)
+            
+            # tile_size=12 ger 84x84 pixlar
+            pov_img = self.env.get_pov_render(tile_size=12) # Ger (84, 84, 3)
+            # Transponera från (H, W, C) till (C, H, W)
+            pov_img = np.transpose(pov_img, (2, 0, 1))
+            # 2. Hantera Frame Stacking manuellt
+            if len(self.frames[me]) == 0:
+                # Vid första steget, fyll stacken med kopior av första bilden
+                for _ in range(self.stack_size):
+                    self.frames[me].append(pov_img)
+            else:
+                self.frames[me].append(pov_img)
+
+            # Slå ihop de 3 bilderna till en (9, 84, 84) tensor
+            stacked_img = np.concatenate(list(self.frames[me]), axis=0)
+
+            # --- SKAPA DICT-OBSERVATIONEN ---
+            role_id = 0 if self.roles[me] == "attacker" else 1
+            
+            observations[me] = {
+                "image": stacked_img,
+                "role": np.array([role_id], dtype=np.float32)
+            }
 
             # Cleanup the grid for the next agent's observation
             for pos, obj in saved_objs.items():
