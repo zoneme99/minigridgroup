@@ -57,10 +57,10 @@ model = PPO(
 
 
 print("Starting Training...")
-model.learn(total_timesteps=1_000_000)
+model.learn(total_timesteps=3_000_000)
 print("Training Finished!")
 
 # 5. Save the Champion
-model.save("ctf_champion_1m_offensive")
+model.save("jonte")
 # 3 million timesteps takes 444 min (8h) to train on a CPU
 # On GPU it takes aound 35 min
