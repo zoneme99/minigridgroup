@@ -34,7 +34,7 @@ class CaptureTheFlagPZ(ParallelEnv):
         self.reward_policy = reward_policy
 
         # Grid Params
-        self.grid_size = 21 # otherwise 21
+        self.grid_size = 17 # otherwise 21
         self.max_steps = 800  # Increased steps for the return trip
 
         self.mission_space = MissionSpace(
@@ -111,7 +111,7 @@ class CaptureTheFlagPZ(ParallelEnv):
 
         # 4. Mirrored Obstacles
         num_pairs = 0
-        target_pairs = 15
+        target_pairs = 10
         while num_pairs < target_pairs:
             x = np.random.randint(1, mid_x)
             y = np.random.randint(1, self.grid_size - 1)
