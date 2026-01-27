@@ -57,7 +57,7 @@ model = PPO(
 
 
 print("Starting Training...")
-model.learn(total_timesteps=3_000_000)
+model.learn(total_timesteps=5_000_000)
 print("Training Finished!")
 
 # 5. Save the Champion

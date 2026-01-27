@@ -5,26 +5,26 @@ from world_object import Flag, Base
 def reward_policy(self, agent_id, rewards, actions, terminations):
     STEP_FACTOR = self.steps / self.max_steps
     # --- Hyper ---
-    REWARD_TAG_ENEMY = 3
-    PENALTY_GETTING_TAGGED = -1
-    REWARD_PICKUP_FLAG = 3
+    REWARD_TAG_ENEMY = 250
+    PENALTY_GETTING_TAGGED = -100
+    REWARD_PICKUP_FLAG = 200
     PENALTY_COLLISION_PLAYER = -0.05
     PENALTY_COLLISION_WALL = -0.1
     # Homing
     # Rewards player for taking the quickest road home while carrying the flag (Manhattan Distance)
-    REWARD_HOMING = 0
+    REWARD_HOMING = 100
     # Gives a penalty if the player diverges from the quickest road flag (Manhattan Distance)
-    PENALTY_HOMING = 0
-    REWARD_SCORE_FLAG_TEAM = 3
-    REWARD_SCORE_FLAG = 6
-    PENALTY_STEP = STEP_FACTOR * 1
+    PENALTY_HOMING = -5
+    REWARD_SCORE_FLAG_TEAM = 250
+    REWARD_SCORE_FLAG = 10000
+    PENALTY_STEP = STEP_FACTOR * 1.5
 
     # --- Role specific rewards ---
     REWARD_DEFENDER_RADIUS = (
         0.5 - STEP_FACTOR
-    )  # Belöning för att vara nära sin egen bas
+    ) * 50  # Belöning för att vara nära sin egen bas
     REWARD_ATTACKER_PROGRESS = (
-        STEP_FACTOR  # Låg belöning för att gå mot fiendens flagga
+        STEP_FACTOR * 50  # Låg belöning för att gå mot fiendens flagga
     )
     DEFENSE_ZONE = 3  # Hur nära basen försvararen ska vara
 
@@ -167,4 +167,3 @@ def reward_policy(self, agent_id, rewards, actions, terminations):
     # Time penalty
 
     rewards[agent_id] += PENALTY_STEP
-
