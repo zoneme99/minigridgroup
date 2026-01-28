@@ -21,20 +21,20 @@ class CaptureTheFlagPZ(ParallelEnv):
 
         # Team definitions
         self.teams = {
-        "red": ["red_1", "red_2"],
-        "blue": ["blue_1", "blue_2"],}
+            "red": ["red_1", "red_2"],
+            "blue": ["blue_1", "blue_2"], }
 
         # Frame Stacking
         self.stack_size = 3
-        self.frames ={agent: deque(maxlen=self.stack_size) for agent in self.possible_agents}
-
+        self.frames = {agent: deque(maxlen=self.stack_size)
+                       for agent in self.possible_agents}
 
         self.agents = self.possible_agents[:]
         self.render_mode = render_mode
         self.reward_policy = reward_policy
 
         # Grid Params
-        self.grid_size = 17 # otherwise 21
+        self.grid_size = 17  # otherwise 21
         self.max_steps = 800  # Increased steps for the return trip
 
         self.mission_space = MissionSpace(
@@ -50,9 +50,10 @@ class CaptureTheFlagPZ(ParallelEnv):
     @functools.lru_cache(maxsize=None)
     def observation_space(self, agent):
         return gym.spaces.Dict({
-        "image": Box(low=0, high=255, shape=(9, 84, 84), dtype=np.uint8),
-        "role": Box(low=0.0, high=1.0, shape=(1,), dtype=np.float32)  # 0: Attacker, 1: Defender
-    })
+            "image": Box(low=0, high=255, shape=(9, 84, 84), dtype=np.uint8),
+            # 0: Attacker, 1: Defender
+            "role": Box(low=0.0, high=1.0, shape=(1,), dtype=np.float32)
+        })
 
     @functools.lru_cache(maxsize=None)
     def action_space(self, agent):
@@ -68,9 +69,9 @@ class CaptureTheFlagPZ(ParallelEnv):
                 # (4x)
                 team_color = "red" if "red" in agent else "blue"
                 if self.carrying_flag.get(agent, False):
-                    self.env.grid.set(*pos, Key(team_color)) # Use team color
+                    self.env.grid.set(*pos, Key(team_color))  # Use team color
                 else:
-                    self.env.grid.set(*pos, Ball(team_color)) # Use team color
+                    self.env.grid.set(*pos, Ball(team_color))  # Use team color
 
         original_agent_pos = self.env.agent_pos
         self.env.agent_pos = (-1, -1)
@@ -143,7 +144,7 @@ class CaptureTheFlagPZ(ParallelEnv):
             # Determine team based on name (e.g., "red_0" -> "red")
             team = "red" if "red" in agent_id else "blue"
             self.agent_dir[agent_id] = 0 if team == "red" else 2
-            
+
             # Find a valid spawn point for this specific agent
             while True:
                 ry = np.random.randint(1, self.grid_size - 1)
@@ -154,7 +155,6 @@ class CaptureTheFlagPZ(ParallelEnv):
                         self.agent_pos[agent_id] = np.array([rx, ry])
                         self.spawn_pos[agent_id] = self.agent_pos[agent_id].copy()
                         break
-        
 
         # ROLE ASSIGNMENT  (USES EXISTING self.teams)
         self.roles = {}
@@ -172,20 +172,20 @@ class CaptureTheFlagPZ(ParallelEnv):
                 self.roles[a1] = "attacker"
             else:
                 self.roles[a0] = "attacker"
-                self.roles[a1] = "defender"                
+                self.roles[a1] = "defender"
 
         # (4x)
         # (!) Agent with Flag Collision 1/2
         # Save initial spawn positions so we can return agents here later
         # We must use .copy() so the spawn point doesn't move when the agent moves
         self.spawn_pos = {
-            agent_id: self.agent_pos[agent_id].copy() 
+            agent_id: self.agent_pos[agent_id].copy()
             for agent_id in self.possible_agents
         }
 
         # Töm kön vid varje reset så att gammal info från förra rundan inte hänger kvar
-        self.frames = {agent: deque(maxlen=self.stack_size) for agent in self.possible_agents}
-        
+        self.frames = {agent: deque(maxlen=self.stack_size)
+                       for agent in self.possible_agents}
 
         return self._get_observations(), {}
 
@@ -196,18 +196,19 @@ class CaptureTheFlagPZ(ParallelEnv):
             # We need to render ALL OTHER agents so 'me' can see them
             saved_objs = {}
             for other in self.agents:
-                if other == me: continue
-                
+                if other == me:
+                    continue
+
                 pos = tuple(self.agent_pos[other])
                 saved_objs[pos] = self.env.grid.get(*pos)
-                
+
                 # Render the other agent as a Ball
                 team_color = "red" if "red" in other else "blue"
                 # (!) This works
                 # self.env.grid.set(*pos, Ball(team_color))
-                
-                # (!) This maybe doesn't work 
-                #     it's suppose to make the AI see an enemy 
+
+                # (!) This maybe doesn't work
+                #     it's suppose to make the AI see an enemy
                 #     carrying a flag as a key as well
                 if self.carrying_flag.get(other, False):
                     self.env.grid.set(*pos, Key(team_color))
@@ -217,9 +218,9 @@ class CaptureTheFlagPZ(ParallelEnv):
             # Render the POV for the current agent
             self.env.agent_pos = self.agent_pos[me]
             self.env.agent_dir = self.agent_dir[me]
-            
+
             # tile_size=12 ger 84x84 pixlar
-            pov_img = self.env.get_pov_render(tile_size=12) # Ger (84, 84, 3)
+            pov_img = self.env.get_pov_render(tile_size=12)  # Ger (84, 84, 3)
             # Transponera från (H, W, C) till (C, H, W)
             pov_img = np.transpose(pov_img, (2, 0, 1))
             # 2. Hantera Frame Stacking manuellt
@@ -235,7 +236,7 @@ class CaptureTheFlagPZ(ParallelEnv):
 
             # --- SKAPA DICT-OBSERVATIONEN ---
             role_id = 0 if self.roles[me] == "attacker" else 1
-            
+
             observations[me] = {
                 "image": stacked_img,
                 "role": np.array([role_id], dtype=np.float32)
@@ -251,17 +252,17 @@ class CaptureTheFlagPZ(ParallelEnv):
     def get_safe_spawn(self, agent_id):
         """Finds the spawn point or the closest available empty floor tile."""
         base_spawn = tuple(self.spawn_pos[agent_id])
-        
+
         # If the exact spawn is empty, return it
         if not any(np.array_equal(base_spawn, p) for p in self.agent_pos.values()):
             return np.array(base_spawn)
-        
+
         # Otherwise, search outward for the nearest Floor tile
         for radius in range(1, 4):
             for dx in range(-radius, radius + 1):
                 for dy in range(-radius, radius + 1):
                     check_pos = (base_spawn[0] + dx, base_spawn[1] + dy)
-                    
+
                     # Check if within grid bounds
                     if 0 < check_pos[0] < self.grid_size and 0 < check_pos[1] < self.grid_size:
                         cell = self.env.grid.get(*check_pos)
@@ -269,9 +270,8 @@ class CaptureTheFlagPZ(ParallelEnv):
                         if cell and cell.type == "floor":
                             if not any(np.array_equal(check_pos, p) for p in self.agent_pos.values()):
                                 return np.array(check_pos)
-                                
-        return np.array(base_spawn) # Fallback
 
+        return np.array(base_spawn)  # Fallback
 
     def step(self, actions):
         rewards = {a: -0.01 for a in self.agents}
