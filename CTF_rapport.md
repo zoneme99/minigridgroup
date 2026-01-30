@@ -11,3 +11,4 @@ Banorna är slumpade varje gång och alla i vår grupp har samma förutsättning
 ## Mitt Bidrag
 
 Jag fick vara med att lägga till en wrapper för all reward policy. Den finns under reward_logic.py. Detta var för att enkelt se och få en dashboard för all rewards man kunde tweaka.
+Detta var målet för gruppen att var för sig träna sin egen modell som sedan ska
